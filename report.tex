@@ -1,0 +1,290 @@
+\documentclass[a4paper,titlepage,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2cm]{geometry}
+\usepackage{parskip}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{multirow}
+\usepackage{gensymb}
+\usepackage[usenames,dvipsnames]{color}
+\hypersetup{
+	colorlinks,
+	pdfauthor=Delan Azabani,
+	pdftitle=Computer Graphics 200: OpenGL assignment
+}
+\lstset{basicstyle=\ttfamily, basewidth=0.5em}
+
+\title{Computer Graphics 200:\\OpenGL assignment}
+\date{November 1, 2014}
+\author{Delan Azabani}
+
+\pagenumbering{gobble}
+\thispdfpagelabel0
+
+\begin{document}
+
+\maketitle
+\pagenumbering{arabic}
+
+\section{Design choices}
+
+Only features from OpenGL 1.4 and its fixed function pipeline were used to
+write this assignment. Although this API has long been deprecated, I chose it
+for a handful of reasons:
+
+\begin{itemize}
+	\item OpenGL 1.4 is the only version supported by the lab machines,
+	      Xubuntu \textit{and} Cygwin
+	\item I found the syntax and semantics easier to learn than using
+	      shaders and buffer objects
+	\item There is a large set of established tutorials and documentation
+	      for OpenGL 1.4
+\end{itemize}
+
+While the assignment lacks models relevant to the `Australian outback' theme
+due to time constraints, every technical and interactive feature required by
+the specification has been met, and even exceeded in some areas.
+
+\section{System overview}
+
+The common namespace prefix \texttt{cg200\_} will hereby be referred to as
+\texttt{@} for brevity.
+
+The assignment's code ultimately starts at \texttt{@main}, which calls
+\texttt{@init} to configure a new window using GLUT. This window shall be
+double buffered for smooth rendering, support an alpha channel for transparency
+and fog, and contain a depth buffer to facilitate drawing of objects in a
+temporal order which is nearly unconstrained. The function also binds callbacks
+for events such as main loop iterations, key presses and window resizes.
+
+\texttt{@start} turns on a large swath of features which are disabled by
+default for performance:
+
+\begin{itemize}
+	\item \texttt{GL\_COLOR\_MATERIAL} allows objects to retain their
+	      coloured surfaces after illumination
+	\item \texttt{GL\_LIGHTING} allows this illumination instead of a
+	      simple, global, invariant light
+	\item \texttt{GL\_FOG} provides a simple global fog effect, which we
+	      configure to be exponential
+	\item \texttt{GL\_NORMALIZE} contributes to prevent lights from dimming
+	      when zooming in
+	\item \texttt{GL\_TEXTURE\_2D} enables texturing which is used for the
+	      floor quadrilateral
+	\item \texttt{GL\_DEPTH\_TEST} enables the use of the depth buffer to
+	      correctly draw overlapping objects
+	\item \texttt{GL\_BLEND} allows overlapping translucent fragments to
+	      blend with one another
+\end{itemize}
+
+Finally the GLUT main loop is started, and after an initial \texttt{@reshape}
+to configure the viewport, the process of rendering each frame occurs with a
+repeated sequence of calls from \texttt{@idle} to \texttt{glutPostRedisplay} to
+\texttt{@render}, which calls \texttt{@state\_init} \textit{once} to establish
+global state.
+
+Every frame starts with \texttt{@state\_tick}, which maintains accounting for
+frame counts, time in the animation and process `worlds' and global scene
+rotation along three axes. The frame is cleared to a gaudy bright magenta to
+catch any accidental errors, then the camera is configured with a perspective
+projection, location and direction using \texttt{@gluLookAt} and zoom is
+applied.
+
+\texttt{@render\_body} is then called after the scene rotations, before
+swapping the frame buffers.
+
+\newpage
+
+\section{Objects and rendering}
+
+A simple night sky is cleared by \texttt{@render\_sky}, then
+\texttt{@render\_lights} creates the four lights positioned at the corners of
+the scene, while also establishing global fog. This fog intensifies as the
+scene becomes more distant by being inversely proportional to the zoom factor.
+
+The floor of the scene is drawn with \texttt{@render\_floor} and consists of a
+simple chequerboard texture which is dynamically generated and loaded once
+while rendering the first frame, then subsequently used repeatedly. A sequence
+of calls to \texttt{glMaterialfv} define the surface finishing for the floor,
+which reflects no ambient light, all diffuse light, and all specular light,
+while being slightly shiny with a small specular exponent.
+
+The floor itself is not one quadrilateral, but 4096 smaller squares arranged
+such that lighting calculations shall be more accurate. This is because OpenGL
+calculates lighting for each vertex, and having more squares implies the
+creation of more vertices.
+
+The oscillating prism is simply a collection of four triangles drawn in a
+single \texttt{GL\_TRIANGLES} sequence. It takes advantage of smooth shading to
+yield faces that vaguely resemble colour gamut diagrams. The vertices that make
+up each triangle have been carefully ordered, not only to maintain a consistent
+anti-clockwise ordering for correct normals, but also to gracefully degrade
+with four distinct coloured faces when flat shading is enabled. This is
+achieved by having distinct colours for the \textit{final} vertex in each
+triangle.
+
+Motion for the prism is a combination of sinusoidal oscillation along the
+positive half of the z-axis, along with monotonic varying rotations around all
+three axial directions. Each axis has a rotation taking the form
+
+$$120\degree\times\left(t+\sin\left(t+\frac{2k\pi}3\right)\right)$$
+
+where $t$ is \texttt{STATE.time\_animation} and $k$ is an integer between zero
+and two inclusive, arbitrarily assigned to the axis of rotation, and intended
+to misalign the times when the rotations about each axis slow down. Because the
+derivative of $t+\sin(t)$ is $1+\cos(t)$ and varies between zero and two
+inclusive, the function is monotonic and the rotation of the prism shall never
+reverse.
+
+Transparency is satisfied by \texttt{@render\_square}, which merely draws an
+elevated quadrilateral with translucent black. The aforementioned prism
+repeatedly cuts through this quadrilateral, demonstrating the ability of
+translucent objects to affect the surrounding colours.
+
+\texttt{@render\_balls} is the most interesting function in the rendering
+sequence. Using a sinusoidal, radial oscillation on the x-y-plane together with
+a linear rotation around the x-axis allows the CMYK coloured balls to meet one
+another in pairs. Level of detail in the sphere models is achieved with the
+supporting \texttt{@calculate\_true\_sphere\_quality} function, which
+quadratically increases the number of faces as the user zooms closer to the
+scene.
+
+To obtain full marks, key bindings and statistics are printed inside the OpenGL
+window instead of \texttt{stdout}. A primitive form of in-band signalling is
+used to allow rasterised text to consist of multiple fonts. Whenever
+\texttt{@draw\_text} encounters a sequence matching
+\texttt{{\textbackslash}a{\textbackslash}d+;} where
+\texttt{{\textbackslash}a} is the ASCII BEL, the font is changed, with the
+integer before the semicolon indexing \texttt{@fonts}.
+
+\newpage
+
+\section{Exceeding the specification}
+
+The following interactive features surpass what is required by the assignment
+specification:
+
+\begin{itemize}
+	\item \texttt{[uU]} toggles clockwise scene rotation around the z-axis,
+	\item \texttt{[lL]} increases/decreases the base level of detail for
+	      the spheres,
+	\item \texttt{[+-]} increases/decreases the field of view from the
+	      default $90\degree$ angle,
+	\item \texttt{[rR]} resets all global state, including the entire
+	      scene, and
+	\item \texttt{[{\textbackslash}n]} switches the assignment to
+	      fullscreen mode.
+\end{itemize}
+
+\section{Interesting facts}
+
+\begin{itemize}
+	\item While depth buffering \textit{mostly} frees developers from
+	      having to sort their objects prior to rendering, some
+	      restrictions still apply. Lights must be established before other
+	      objects that shall be affected by them, and opaque objects must
+	      be drawn before translucent objects that they may intersect when
+	      projected.
+	\item Two techniques must be combined to ensure that lights do not
+	      erroneously change intensity while zooming with \texttt{glScalef}
+	      --- \texttt{GL\_NORMALIZE} must be enabled, as well as a
+	      \texttt{GL\_LINEAR\_ATTENUATION} which is inversely proportional
+	      to the zoom factor.
+	\item There doesn't appear to be a stack for material parameters, so
+	      care must be taken to restore the surface finish values to their
+	      defaults to avoid clobbering the rendering of other objects.
+	\item To attain correct colours for rasterised text, lighting and fog
+	      must be disabled prior to calling \texttt{glutBitmapCharacter}
+	      and subsequently enabled afterwards.
+	\item Depth testing must also be disabled temporarily while drawing
+	      text, or some objects may obscure parts of the text in extreme
+	      cases of model locations and zoom.
+	\item Logical XOR can easily be achieved with \texttt{!=} even though
+	      C doesn't have a \texttt{\^{}\^{}} operator.
+\end{itemize}
+
+\newpage
+
+\section{References}
+
+\begin{itemize}
+\item
+Clark, R. (2012)
+\textit{OpenGL:Tutorial Framework:Light and Fog}.
+Retrieved from \\
+http://content.gpwiki.org/index.php/OpenGL:Tutorials:Tutorial\_Framework
+\item
+Eusebeîa. (2014)
+\textit{The Tetrahedron}. \\
+Retrieved from
+http://eusebeia.dyndns.org/4d/tetrahedron
+\item
+Gamedev.net. (2012)
+\textit{NeHe Productions - Everything OpenGL}. \\
+Retrieved from
+http://nehe.gamedev.net/
+\item
+Hennig, M. (2011)
+\textit{opengl --- Setting glutBitmapCharacter color? --- Stack Overflow}. \\
+Retrieved from
+http://stackoverflow.com/a/8239654
+\item
+Khronos Group. (2002)
+\textit{The relationship between glScalef() and light intensity}. \\
+Retrieved from
+https://www.opengl.org/discussion\_boards/showthread.php/154816
+\item
+Khronos Group. (2001)
+\textit{Transparency, Translucency, and Blending}.
+Retrieved from \\
+https://www.opengl.org/archives/resources/faq/technical/transparency.htm
+\item
+Kilgard, M. J. (2000)
+\textit{Avoiding 16 Common OpenGL Pitfalls}.
+Retrieved from \\
+http://www.opengl.org/archives/resources/features/KilgardTechniques/oglpitfall/
+\item
+Kilgard, M. J. (1996)
+\textit{glutSolidCube, glutWireCube}.
+Retrieved from \\
+https://www.opengl.org/documentation/specs/glut/spec3/node82.html
+\item
+Kilgard, M. J. (1996)
+\textit{glutSolidSphere, glutWireSphere}.
+Retrieved from \\
+https://www.opengl.org/resources/libraries/glut/spec3/node81.html
+\item
+Microsoft Corporation. (2012)
+\textit{glMaterialfv function}.
+Retrieved from \\
+http://msdn.microsoft.com/en-us/library/windows/desktop/dd373945.aspx
+\item
+Silicon Graphics, Inc. (2006)
+\textit{glColorMaterial}.
+Retrieved from \\
+https://www.opengl.org/sdk/docs/man2/xhtml/glColorMaterial.xml
+\item
+Silicon Graphics, Inc. (2006)
+\textit{glLight}.
+Retrieved from \\
+https://www.opengl.org/sdk/docs/man2/xhtml/glLight.xml
+\item
+Silicon Graphics, Inc. (2006)
+\textit{glRotate}.
+Retrieved from \\
+https://www.opengl.org/sdk/docs/man2/xhtml/glRotate.xml
+\item
+Silicon Graphics, Inc. (2006)
+\textit{glShadeModel}.
+Retrieved from \\
+https://www.opengl.org/sdk/docs/man2/xhtml/glShadeModel.xml
+\item
+Urquhart, D. (2010)
+\textit{OpenGL 2 Tutorials --- Swiftless Tutorials}. \\
+Retrieved from
+http://www.swiftless.com/opengltuts.html
+\end{itemize}
+
+\end{document}
